@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MCQ Test Simulator</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <style>
+    /* General Styling */
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 0;
+      background-color: #eef2f3;
+      color: #333;
+    }
+    header, footer {
+      background-color: #007BFF;
+      color: white;
+      text-align: center;
+      padding: 20px 0;
+    }
+    .container {
+      max-width: 800px;
+      margin: 20px auto;
+      padding: 20px;
+      background: #fff;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    }
+    .btn {
+      display: inline-block;
+      margin: 10px 5px;
+      padding: 10px 20px;
+      background-color: #28a745;
+      color: white;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 1em;
+    }
+    .btn:hover { background-color: #218838; }
+    .btn-secondary { background-color: #007BFF; }
+    .btn-secondary:hover { background-color: #0056b3; }
+    .hidden { display: none; }
+    .error { color: red; margin-top: 10px; font-size: 0.9em; }
+    .timer { font-size: 1.2em; font-weight: bold; text-align: center; margin-bottom: 20px; }
+
+    /* Question Tabs */
+    .question-tabs-container {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+      margin-bottom: 20px;
+    }
+    .question-tabs {
+      display: flex;
+      gap: 10px;
+      justify-content: center;
+      flex-wrap: nowrap;
+      overflow-x: auto;
+      padding: 10px 0;
+      scrollbar-width: thin; /* Thin scrollbar for better UX */
+    }
+    .tab {
+      width: 40px;
+      height: 40px;
+      line-height: 40px;
+      text-align: center;
+      border-radius: 50%;
+      background-color: #f1f1f1;
+      cursor: pointer;
+      font-weight: bold;
+      flex-shrink: 0; /* Prevent shrinking in scrollable view */
+    }
+    .tab.answered {
+      background-color: #28a745;
+      color: white;
+    }
+    .tab.unanswered {
+      background-color: #dc3545;
+      color: white;
+    }
+    .tab.review {
+      background-color: #ffc107;
+      color: black;
+    }
+    .scroll-btn {
+      background: #007BFF;
+      color: white;
+      border: none;
+      padding: 5px 10px;
+      cursor: pointer;
+      font-size: 18px;
+      border-radius: 5px;
+    }
+    .scroll-btn:disabled {
+      background: #ccc;
+      cursor: not-allowed;
+    }
+    .options label {
+      display: block; /* Ensure each option takes its own row */
+      margin-bottom: 8px; /* Add spacing between options */
+      cursor: pointer; /* Pointer for better interaction */
+      font-size: 1em; /* Ensure readability */
+    }
+    @media (max-width: 600px) {
+      .tab {
+        width: 30px;
+        height: 30px;
+        line-height: 30px;
+        font-size: 0.9em;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>MCQ Test Simulator</h1>
+  </header>
+
+  <!-- Upload Container -->
+  <div class="container" id="upload-container">
+    <h2>Upload Word File for MCQs</h2>
+    <label for="word-upload" class="btn">Upload Word File</label>
+    <input type="file" id="word-upload" accept=".doc,.docx" style="display: none;" />
+    <p id="upload-error" class="error hidden" role="alert">Invalid file format or structure.</p>
+  </div>
+
+  <!-- Quiz Container -->
+  <div class="container hidden" id="quiz-container">
+    <div class="timer" id="timer" aria-live="polite"></div>
+    <div class="question-tabs-container">
+      <button class="scroll-btn left" onclick="scrollTabs(-1)">&#9664;</button>
+      <div id="question-tabs" class="question-tabs"></div>
+      <button class="scroll-btn right" onclick="scrollTabs(1)">&#9654;</button>
+    </div>
+    <div id="quiz"></div>
+    <div class="navigation">
+      <button class="btn btn-secondary" id="prev-btn" aria-label="Previous Question">Previous</button>
+      <button class="btn btn-secondary" id="next-btn" aria-label="Next Question">Next</button>
+    </div>
+    <button class="btn" id="submit-btn">Submit</button>
+    <p id="validation-error" class="error hidden" role="alert">Please answer all questions before submitting.</p>
+  </div>
+
+  <!-- Results Container -->
+  <div class="container hidden" id="result-container">
+    <h2>Your Results</h2>
+    <div id="results"></div>
+    <button class="btn" id="restart-btn">Restart</button>
+  </div>
+
+  <footer>
+    <p>&copy; 2025 MCQ Test Simulator</p>
+  </footer>
+
+  <script>
+    const state = {
+      questions: [],
+      answers: [],
+      currentQuestionIndex: 0,
+      timer: null,
+      totalTime: 0,
+    };
+
+    const elements = {
+      uploadContainer: document.getElementById("upload-container"),
+      quizContainer: document.getElementById("quiz-container"),
+      resultContainer: document.getElementById("result-container"),
+      wordUpload: document.getElementById("word-upload"),
+      uploadError: document.getElementById("upload-error"),
+      timerDisplay: document.getElementById("timer"),
+      questionTabs: document.getElementById("question-tabs"),
+      quiz: document.getElementById("quiz"),
+      prevBtn: document.getElementById("prev-btn"),
+      nextBtn: document.getElementById("next-btn"),
+      submitBtn: document.getElementById("submit-btn"),
+      results: document.getElementById("results"),
+      restartBtn: document.getElementById("restart-btn"),
+    };
+
+    elements.wordUpload.addEventListener("change", handleFileUpload);
+    elements.prevBtn.addEventListener("click", navigatePrevious);
+    elements.nextBtn.addEventListener("click", navigateNext);
+    elements.submitBtn.addEventListener("click", submitQuiz);
+    elements.restartBtn.addEventListener("click", restartQuiz);
+
+    async function handleFileUpload(event) {
+      const file = event.target.files[0];
+      if (!file || !file.name.match(/\.docx?$/)) {
+        showError("Invalid file format. Please upload a valid Word document.");
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        try {
+          const content = await extractTextFromWord(e.target.result);
+          const questions = parseQuestions(content);
+          if (!validateQuestions(questions)) throw new Error("Invalid question structure.");
+          initializeQuiz(questions);
+        } catch (error) {
+          showError("Error processing the file. Check the format.");
+        }
+      };
+      reader.readAsArrayBuffer(file);
+    }
+
+    async function extractTextFromWord(buffer) {
+      const zip = new JSZip();
+      await zip.loadAsync(buffer);
+      const xml = await zip.file("word/document.xml").async("string");
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(xml, "application/xml");
+      return Array.from(doc.getElementsByTagName("w:t")).map((node) => node.textContent).join("\n");
+    }
+
+    function parseQuestions(content) {
+      const questions = [];
+      const questionBlocks = content.split(/\d+\.\s/).slice(1); // Split content into blocks by question numbers
+      questionBlocks.forEach((block) => {
+        const optionsMatch = block.match(/[A-E]\.\s.+/g);
+        const answerMatch = block.match(/Answer:\s*([A-E])/i);
+        const questionText = block.split(/[A-E]\.\s/)[0]?.trim();
+
+        if (optionsMatch && answerMatch && questionText) {
+          const options = optionsMatch.map((opt) => opt.replace(/[A-E]\.\s/, "").trim());
+          const correctAnswer = answerMatch[1].toUpperCase().charCodeAt(0) - 65;
+          questions.push({ question: questionText, options, answer: correctAnswer });
+        }
+      });
+      return questions;
+    }
+
+    function validateQuestions(questions) {
+      return Array.isArray(questions) &&
+        questions.every(q =>
+          typeof q.question === "string" &&
+          Array.isArray(q.options) &&
+          q.options.length >= 2 &&
+          typeof q.answer === "number" &&
+          q.answer >= 0 &&
+          q.answer < q.options.length);
+    }
+
+    function initializeQuiz(questions) {
+      state.questions = questions;
+      state.answers = Array(questions.length).fill(null);
+      state.totalTime = questions.length * 60;
+      showQuiz();
+    }
+
+    function showError(message) {
+      elements.uploadError.textContent = message;
+      elements.uploadError.classList.remove("hidden");
+      setTimeout(() => elements.uploadError.classList.add("hidden"), 5000);
+    }
+
+    function showQuiz() {
+      elements.uploadContainer.classList.add("hidden");
+      elements.quizContainer.classList.remove("hidden");
+      renderQuestion();
+      updateTabs();
+      startTimer();
+    }
+
+    function renderQuestion() {
+      const question = state.questions[state.currentQuestionIndex];
+      elements.quiz.innerHTML = `
+        <div class="question">
+          <h3>${state.currentQuestionIndex + 1}. ${question.question}</h3>
+          <div class="options">
+            ${question.options.map((opt, i) => `
+              <label>
+                <input type="radio" name="question${state.currentQuestionIndex}" value="${i}" ${state.answers[state.currentQuestionIndex] === i ? "checked" : ""}>
+                ${opt}
+              </label>
+            `).join("")}
+          </div>
+        </div>
+      `;
+      elements.prevBtn.disabled = state.currentQuestionIndex === 0;
+      elements.nextBtn.disabled = state.currentQuestionIndex === state.questions.length - 1;
+    }
+
+    function updateTabs() {
+      elements.questionTabs.innerHTML = state.questions.map((_, i) => `
+        <div class="tab ${state.answers[i] !== null ? "answered" : "unanswered"}" onclick="jumpToQuestion(${i})">${i + 1}</div>
+      `).join("");
+    }
+
+    function scrollTabs(direction) {
+      const tabs = elements.questionTabs;
+      tabs.scrollBy({ left: direction * 100, behavior: "smooth" });
+    }
+
+    function navigatePrevious() {
+      if (state.currentQuestionIndex > 0) {
+        storeAnswer();
+        state.currentQuestionIndex--;
+        renderQuestion();
+        updateTabs();
+      }
+    }
+
+    function navigateNext() {
+      if (state.currentQuestionIndex < state.questions.length - 1) {
+        storeAnswer();
+        state.currentQuestionIndex++;
+        renderQuestion();
+        updateTabs();
+      }
+    }
+
+    function storeAnswer() {
+      const selected = document.querySelector(`input[name="question${state.currentQuestionIndex}"]:checked`);
+      if (selected) {
+        state.answers[state.currentQuestionIndex] = parseInt(selected.value, 10);
+      }
+    }
+
+    function submitQuiz() {
+      storeAnswer();
+      if (state.answers.includes(null)) {
+        showError("Please answer all questions before submitting.");
+        return;
+      }
+
+      clearInterval(state.timer);
+      elements.quizContainer.classList.add("hidden");
+      elements.resultContainer.classList.remove("hidden");
+
+      const score = state.questions.reduce((acc, q, i) => acc + (q.answer === state.answers[i] ? 1 : 0), 0);
+      elements.results.innerHTML = `
+        <p>Your Score: ${score} / ${state.questions.length}</p>
+        ${state.questions.map((q, i) => `
+          <div class="result ${q.answer === state.answers[i] ? "correct" : "incorrect"}">
+            <h4>${i + 1}. ${q.question}</h4>
+            <p>Your Answer: ${q.options[state.answers[i]] || "Not Answered"}</p>
+            <p>Correct Answer: ${q.options[q.answer]}</p>
+          </div>
+        `).join("")}
+      `;
+    }
+
+    function restartQuiz() {
+      state.currentQuestionIndex = 0;
+      state.answers = Array(state.questions.length).fill(null);
+      showQuiz();
+    }
+
+    function startTimer() {
+      const startTime = Date.now();
+      state.timer = setInterval(() => {
+        const elapsed = Math.floor((Date.now() - startTime) / 1000);
+        const remaining = state.totalTime - elapsed;
+        if (remaining <= 0) {
+          clearInterval(state.timer);
+          submitQuiz();
+        }
+        const minutes = Math.floor(remaining / 60);
+        const seconds = remaining % 60;
+        elements.timerDisplay.textContent = `Time Remaining: ${minutes}:${seconds < 10 ? "0" : ""}${seconds}`;
+      }, 1000);
+    }
+  </script>
+</body>
+</html>
